@@ -1,37 +1,90 @@
+
 """
 Syndicate Typology & Modus Operandi (MO) Forensic Classifier.
-Classifies on-chain behavioral signatures into established Indian & Global cybercrime patterns.
+
+Classifies on-chain behavioral indicators into screening typologies.
+These classifications are heuristic indicators, not proof of criminal activity.
 """
 
-from typing import List, Dict, Any
+from typing import Any, Dict
+
 
 TYPOLOGY_DEFINITIONS = {
     "TELEGRAM_TASK_FRAUD": {
-        "name": "Southeast Asian Telegram Task Scam / Part-Time Job Fraud",
-        "description": "Victim lured into Telegram task group, instructed to send TRON USDT deposits. Automated multi-hop mule layering with fixed 1-5% peeling cuts followed by instant CEX consolidation.",
-        "statutory_violation": "Section 318(4) BNS, 2023 & Section 66D IT Act, 2000"
+        "name": "TRON-Based Peeling Pattern",
+        "description": (
+            "A peeling pattern was detected on a TRON-related chain. "
+            "This pattern may be consistent with multi-hop fund distribution, "
+            "but does not independently establish Telegram task fraud."
+        ),
+        "statutory_violation": (
+            "Potentially relevant legal provisions require independent "
+            "verification and legal review."
+        ),
     },
     "PIG_BUTCHERING_SHA_ZHU_PAN": {
-        "name": "Pig Butchering / Investment Romance Scam (Sha Zhu Pan)",
-        "description": "Gradual capital accumulation on deceptive trading platforms, followed by complete liquidity draining to exchange user deposit forwarders.",
-        "statutory_violation": "Section 316(2), 318(4) BNS, 2023"
+        "name": "Investment-Related Peeling Pattern",
+        "description": (
+            "A peeling pattern was detected. This may indicate staged fund "
+            "distribution, but transaction patterns alone cannot establish "
+            "investment fraud or pig-butchering activity."
+        ),
+        "statutory_violation": (
+            "Potentially relevant legal provisions require independent "
+            "verification and legal review."
+        ),
     },
     "MIXER_OBSCURATION": {
-        "name": "Sanctioned Privacy Mixer Obscuration / Asset Concealment",
-        "description": "Funds routed through non-custodial cryptographic pools (Tornado Cash, Sinbad, Blender) or cross-chain bridge services to sever audit trail.",
-        "statutory_violation": "Section 3 PMLA, 2002 (Money Laundering) & Section 94 BNSS, 2023"
+        "name": "Mixer or Privacy-Service Exposure",
+        "description": (
+            "The address is associated with a configured mixer or "
+            "privacy-related service directory entry. This is a screening "
+            "indicator and does not establish criminal intent."
+        ),
+        "statutory_violation": (
+            "Potentially relevant legal provisions require independent "
+            "verification and legal review."
+        ),
     },
     "P2P_SMURFING_RING": {
-        "name": "Coordinated P2P Smurfing & Layering Ring",
-        "description": "Transactions split into amounts under reporting thresholds ($9,000-$9,950 or ₹50,000) across multiple synthetic identity mule wallets.",
-        "statutory_violation": "Section 12 PMLA, 2002 & Section 106 BNSS, 2023"
+        "name": "Structuring-Like Transaction Pattern",
+        "description": (
+            "Transaction amounts exhibit a structuring-like pattern. "
+            "This indicator requires contextual investigation and does not "
+            "by itself establish coordinated P2P smurfing."
+        ),
+        "statutory_violation": (
+            "Potentially relevant legal provisions require independent "
+            "verification and legal review."
+        ),
     },
     "STANDARD_RAPID_MULE": {
-        "name": "Automated Intermediary Hop Layering",
-        "description": "High-velocity pass-through mule wallet with short dwell time designed to add synthetic hops before exchange liquidation.",
-        "statutory_violation": "Section 318(4) BNS, 2023"
-    }
+        "name": "Intermediary Transaction Activity",
+        "description": (
+            "No sufficiently specific typology signal was established. "
+            "The address is retained under the default classification for "
+            "compatibility; rapid mule activity has not been confirmed."
+        ),
+        "statutory_violation": (
+            "No specific statutory violation can be inferred from the "
+            "available indicators alone."
+        ),
+    },
 }
+
+
+def _valid_bool(value: Any) -> bool:
+    """Accept actual boolean values only."""
+    return isinstance(value, bool) and value
+
+
+def _normalize_chain(chain: Any) -> str:
+    """Safely normalize a blockchain identifier."""
+    if not isinstance(chain, str):
+        return ""
+
+    return chain.strip().upper()
+
 
 def classify_syndicate_typology(
     chain: str,
@@ -41,36 +94,64 @@ def classify_syndicate_typology(
     is_rapid_forwarder: bool,
     dwell_time_seconds: Any,
     destination_found: bool,
-    target_vasp_name: Any = None
+    target_vasp_name: Any = None,
 ) -> Dict[str, Any]:
     """
-    Classifies the dominant laundering modus operandi based on multi-signal indicators.
+    Classify the dominant behavioral indicator.
+
+    Confidence values are heuristic scores, not calibrated probabilities.
+
+    dwell_time_seconds and target_vasp_name are retained for API
+    compatibility. They are not currently used as independent
+    classification signals.
     """
-    if is_mixer:
+
+    normalized_chain = _normalize_chain(chain)
+
+    mixer_detected = _valid_bool(is_mixer)
+    peeling_detected = _valid_bool(is_peeling)
+    structuring_detected = _valid_bool(is_structuring)
+    rapid_forwarder_detected = _valid_bool(is_rapid_forwarder)
+    destination_detected = _valid_bool(destination_found)
+
+    # Priority 1: Known mixer or privacy-service exposure.
+    if mixer_detected:
         typ = "MIXER_OBSCURATION"
         confidence = 0.96
-    elif is_peeling and ("TRON" in chain.upper() or "TRC" in chain.upper()):
+
+    # Priority 2: Peeling pattern on TRON-related chains.
+    elif peeling_detected and (
+        "TRON" in normalized_chain or "TRC" in normalized_chain
+    ):
         typ = "TELEGRAM_TASK_FRAUD"
-        confidence = 0.94
-    elif is_structuring:
+        confidence = 0.75
+
+    # Priority 3: Structuring-like transaction pattern.
+    elif structuring_detected:
         typ = "P2P_SMURFING_RING"
-        confidence = 0.88
-    elif is_rapid_forwarder and destination_found:
+        confidence = 0.78
+
+    # Priority 4: Rapid forwarder with a detected destination.
+    elif rapid_forwarder_detected and destination_detected:
         typ = "STANDARD_RAPID_MULE"
-        confidence = 0.85
-    elif is_peeling:
+        confidence = 0.80
+
+    # Priority 5: Peeling pattern on other chains.
+    elif peeling_detected:
         typ = "PIG_BUTCHERING_SHA_ZHU_PAN"
-        confidence = 0.82
-    else:
-        typ = "STANDARD_RAPID_MULE"
         confidence = 0.70
 
-    details = TYPOLOGY_DEFINITIONS.get(typ, TYPOLOGY_DEFINITIONS["STANDARD_RAPID_MULE"])
+    # Default: insufficient evidence for a specific typology.
+    else:
+        typ = "STANDARD_RAPID_MULE"
+        confidence = 0.30
+
+    details = TYPOLOGY_DEFINITIONS[typ]
 
     return {
         "typology_code": typ,
         "typology_name": details["name"],
         "confidence": confidence,
         "description": details["description"],
-        "statutory_violation": details["statutory_violation"]
+        "statutory_violation": details["statutory_violation"],
     }

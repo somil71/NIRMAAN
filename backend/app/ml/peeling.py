@@ -1,81 +1,119 @@
+
 """
 Peeling Chain, Structuring & Forwarding Velocity Classifier.
 Identifies algorithmic money laundering patterns used by cyber syndicates.
 """
 
-from typing import List, Dict, Any, Tuple
-import datetime
+from math import isfinite
+from typing import List, Dict, Any, Optional
+
+
+def _get_valid_amount(tx: Any) -> Optional[float]:
+    """Extract a finite, non-negative transaction amount."""
+    if not isinstance(tx, dict):
+        return None
+
+    raw_value = tx.get("usd_value")
+    if raw_value is None:
+        raw_value = tx.get("amount")
+
+    if isinstance(raw_value, bool) or raw_value is None:
+        return None
+
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+    if not isfinite(value) or value < 0:
+        return None
+
+    return value
+
+
+def _empty_peeling_result() -> Dict[str, Any]:
+    return {
+        "is_peeling_chain": False,
+        "peel_confidence": 0.0,
+        "peel_ratio": 0.0,
+        "peeled_amount_usd": 0.0,
+        "change_amount_usd": 0.0,
+    }
+
 
 def analyze_peeling_chain(
     incoming_transfers: List[Dict[str, Any]],
     outgoing_transfers: List[Dict[str, Any]]
 ) -> Dict[str, Any]:
     """
-    Evaluates whether an address functions as a hop in an automated peeling chain.
-    In a peeling chain:
-    - An address receives a lump sum.
-    - It emits 2 outputs: a small peeled amount (cashout/fee) and a large change amount.
-    - Peel ratio (small / total) is typically between 1% and 15%.
+    Detect a potential peeling pattern with 2 or 3 outgoing transfers.
+
+    The smallest output is treated as the peeled amount.
+    The largest output is treated as the change amount.
+
+    The 1%-20% ratio is a heuristic, not proof of illicit activity.
     """
-    if not outgoing_transfers:
-        return {
-            "is_peeling_chain": False,
-            "peel_confidence": 0.0,
-            "peel_ratio": 0.0,
-            "peeled_amount_usd": 0.0,
-            "change_amount_usd": 0.0
-        }
+    if not isinstance(outgoing_transfers, list):
+        return _empty_peeling_result()
 
-    # Out degree check: classic peeling has out-degree of 2 (or 3)
     out_degree = len(outgoing_transfers)
-    out_values = [float(tx.get("usd_value") or tx.get("amount") or 0.0) for tx in outgoing_transfers]
-    out_values = [v for v in out_values if v > 0]
 
-    if out_degree in [2, 3] and len(out_values) >= 2:
-        sorted_vals = sorted(out_values)
-        small_val = sorted_vals[0]
-        large_val = sorted_vals[-1]
-        total = sum(sorted_vals)
+    if out_degree not in (2, 3):
+        return _empty_peeling_result()
 
-        if total > 0:
-            peel_ratio = small_val / total
-            # Classic peel: 1% to 15% peeled off, rest passed as change
-            if 0.01 <= peel_ratio <= 0.20:
-                confidence = min(0.98, 0.70 + (0.28 * (1.0 - (peel_ratio / 0.20))))
-                return {
-                    "is_peeling_chain": True,
-                    "peel_confidence": round(confidence, 3),
-                    "peel_ratio": round(peel_ratio, 4),
-                    "peeled_amount_usd": round(small_val, 2),
-                    "change_amount_usd": round(large_val, 2)
-                }
+    values = [_get_valid_amount(tx) for tx in outgoing_transfers]
+
+    # Reject the entire candidate if any output is invalid or zero.
+    if any(value is None or value <= 0 for value in values):
+        return _empty_peeling_result()
+
+    sorted_values = sorted(values)
+    total = sum(sorted_values)
+
+    if not isfinite(total) or total <= 0:
+        return _empty_peeling_result()
+
+    small_value = sorted_values[0]
+    large_value = sorted_values[-1]
+    peel_ratio = small_value / total
+
+    if not 0.01 <= peel_ratio <= 0.20:
+        return _empty_peeling_result()
+
+    confidence = min(
+        0.98,
+        0.70 + (0.28 * (1.0 - (peel_ratio / 0.20)))
+    )
 
     return {
-        "is_peeling_chain": False,
-        "peel_confidence": 0.0,
-        "peel_ratio": 0.0,
-        "peeled_amount_usd": 0.0,
-        "change_amount_usd": 0.0
+        "is_peeling_chain": True,
+        "peel_confidence": round(confidence, 3),
+        "peel_ratio": round(peel_ratio, 4),
+        "peeled_amount_usd": round(small_value, 2),
+        "change_amount_usd": round(large_value, 2),
     }
 
-def detect_structuring_smurfing(outgoing_transfers: List[Dict[str, Any]]) -> Dict[str, Any]:
+
+def detect_structuring_smurfing(
+    outgoing_transfers: List[Dict[str, Any]]
+) -> Dict[str, Any]:
     """
-    Detects smurfing/structuring patterns where transactions are deliberately
-    split into amounts just below standard threshold limits (e.g. $9,000 - $9,950 USD)
-    to evade automated AML compliance flags.
+    Detect repeated transfers in the configured $8,500-$9,999 range.
+
+    This is a heuristic indicator, not proof of threshold evasion.
     """
-    if not outgoing_transfers:
+    if not isinstance(outgoing_transfers, list):
         return {"is_structuring": False, "suspicious_tx_count": 0}
 
     smurf_count = 0
+
     for tx in outgoing_transfers:
-        val = float(tx.get("usd_value") or tx.get("amount") or 0.0)
-        # Frequent crypto AML structuring range: $8,500 to $9,999
-        if 8500.0 <= val <= 9999.0:
+        value = _get_valid_amount(tx)
+
+        if value is not None and 8500.0 <= value <= 9999.0:
             smurf_count += 1
 
-    is_structuring = smurf_count >= 2
     return {
-        "is_structuring": is_structuring,
-        "suspicious_tx_count": smurf_count
+        "is_structuring": smurf_count >= 2,
+        "suspicious_tx_count": smurf_count,
     }

@@ -20,7 +20,7 @@ from app.core.legal_notice import compute_canonical_evidence_digest
 from app.crawlers.tron import DEMO_FIXTURE_TRAIL
 from app.crawlers.evm import DEMO_EVM_TRAIL
 from app.crawlers.btc import DEMO_BTC_TRAIL
-from app.ml.graph_clustering import build_nx_graph, calculate_graph_centrality
+from app.ml.graph_clustering import build_nx_graph
 
 logger = logging.getLogger("nirmaan.core.tracer")
 
@@ -267,11 +267,7 @@ class ForensicTracer:
         vasp_nodes = [n.address for n in nodes_map.values() if n.node_type == "VASP_HOT" or n.vasp_name]
 
         for node_id, node in nodes_map.items():
-            centrality = calculate_graph_centrality(G, node.address)
             if node.feature_vector and len(node.feature_vector) >= 8:
-                # Dim 3: graph PageRank centrality scaled to [0.0, 1.0]
-                node.feature_vector[3] = min(1.0, centrality.get("pagerank", 0.0) * 10.0)
-
                 # Dim 6: mixer proximity computed from real shortest path to identified mixer
                 if node.is_mixer or node.node_type == "MIXER":
                     node.feature_vector[6] = 1.0
