@@ -6,6 +6,7 @@ Supports TRON, EVM (Ethereum/BSC), and Bitcoin.
 """
 import os
 import json
+import math
 import time
 import uuid
 import hashlib
@@ -226,7 +227,7 @@ class ForensicTracer:
 
         # ML Risk, Syndicate Typology & Graph Analytics Layer (Vertical 2)
         dominant_typology = None
-        max_ml_score = 0.0
+        max_ml_score: float = 0.0
 
         for node_id, node in nodes_map.items():
             in_edges = [e.model_dump() for e in edges_list if e.target == node_id]
@@ -250,8 +251,15 @@ class ForensicTracer:
             node.feature_vector = risk_profile.get("feature_vector")
             node.typology = risk_profile.get("typology")
 
-            if node.risk_score > max_ml_score:
-                max_ml_score = node.risk_score
+            # Risk scores may be optional in the schema; only aggregate numeric scores.
+            node_risk_score = node.risk_score
+            if (
+                isinstance(node_risk_score, (int, float))
+                and not isinstance(node_risk_score, bool)
+                and math.isfinite(node_risk_score)
+                and node_risk_score > max_ml_score
+            ):
+                max_ml_score = float(node_risk_score)
 
             if risk_profile.get("typology") and not dominant_typology:
                 dominant_typology = risk_profile["typology"]

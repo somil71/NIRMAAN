@@ -63,11 +63,15 @@ def analyze_peeling_chain(
 
     values = [_get_valid_amount(tx) for tx in outgoing_transfers]
 
-    # Reject the entire candidate if any output is invalid or zero.
+    # Narrow Optional[float] to float while preserving the all-or-nothing rule.
     if any(value is None or value <= 0 for value in values):
         return _empty_peeling_result()
 
-    sorted_values = sorted(values)
+    valid_values = [value for value in values if value is not None]
+    if len(valid_values) != out_degree:
+        return _empty_peeling_result()
+
+    sorted_values = sorted(valid_values)
     total = sum(sorted_values)
 
     if not isfinite(total) or total <= 0:

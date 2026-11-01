@@ -11,11 +11,13 @@ from app.ml.graph_clustering import (
 )
 
 def test_build_graph_ignores_invalid_edges():
-    graph = build_nx_graph([
+    # This test deliberately supplies malformed runtime input (None) to verify
+    # defensive validation in build_nx_graph, despite its typed input contract.
+    graph = build_nx_graph([  # type: ignore[arg-type]
         {"source": "A", "target": "B", "usd_value": "100"},
         {"source": "B", "target": "C", "usd_value": "invalid"},
         {"source": None, "target": "D", "usd_value": 50},
-        None,
+        None, # pyright: ignore[reportArgumentType]
         {"source": "C", "target": "D", "usd_value": -10},
     ])
 
